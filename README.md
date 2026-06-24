@@ -1,4 +1,3 @@
-```markdown
 # Queue Cure
 
 A live token queue for clinics, featuring a cyberpunk aesthetic. It provides a real-time receptionist control dashboard and a public waiting-room display matrix that stay instantly synchronized when a token is generated or advanced—no browser refreshes required on either screen.
