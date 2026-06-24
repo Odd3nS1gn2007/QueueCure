@@ -1,7 +1,7 @@
 // frontend/src/pages/Receptionist.jsx
 import React, { useState, useEffect } from 'react';
 import io from 'socket.io-client';
-import { UserPlus, Search, LogOut, ArrowUp, Zap } from 'lucide-react';
+import { UserPlus, Search, LogOut, ArrowUp, Zap, Trash2 } from 'lucide-react';
 
 const socket = io('http://localhost:5000');
 
@@ -53,14 +53,30 @@ export default function Receptionist() {
     } catch (err) { console.error(err); }
   };
 
+  // Triggers backend wipeout endpoint for the active department
+  const handleResetQueue = async () => {
+    if (window.confirm(`⚠️ Are you sure you want to completely clear the live queue for ${department}? This resets tokens to 0.`)) {
+      try {
+        const response = await fetch('http://localhost:5000/api/queue/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ department })
+        });
+        if (!response.ok) throw new Error("Reset action failed");
+      } catch (err) {
+        console.error("Error resetting department queue:", err);
+      }
+    }
+  };
+
   const filteredPatients = queueState.waitingList.filter(p => 
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.tokenNumber.toString() === searchQuery
   );
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-800/50 border border-slate-700/40 p-4 rounded-2xl">
+    <div className="space-y-6 w-full">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-800/50 border border-slate-700/40 p-4 rounded-2xl w-full">
         <div className="flex items-center gap-3">
           <label className="text-sm font-semibold text-slate-400">Department:</label>
           <select value={department} onChange={(e) => setDepartment(e.target.value)} className="bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -70,15 +86,22 @@ export default function Receptionist() {
             <option>Dermatology</option>
           </select>
         </div>
-        <button className="flex items-center gap-2 text-sm font-medium text-rose-400 hover:text-rose-300 transition px-3 py-1.5 rounded-lg hover:bg-rose-500/10"><LogOut className="w-4 h-4" /> Log Out</button>
-      </div>
+        </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 w-full">
         <div className="space-y-6 lg:col-span-1">
-          <div className="bg-gradient-to-br from-indigo-900/40 to-slate-800/50 border border-indigo-500/20 p-6 rounded-2xl text-center shadow-xl">
-            <h3 className="text-xs font-bold tracking-wider uppercase text-indigo-400">Now Serving</h3>
-            <p className="text-6xl font-black text-white my-2">#{queueState.currentToken}</p>
-            <button onClick={handleCallNext} disabled={queueState.waitingList.length === 0} className="mt-5 w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 text-white font-semibold py-3 px-4 rounded-xl transition-all duration-200"><Zap className="w-5 h-5" /> Call Next Patient</button>
+          <div className="bg-gradient-to-br from-indigo-900/40 to-slate-800/50 border border-indigo-500/20 p-6 rounded-2xl text-center shadow-xl flex flex-col justify-between">
+            <div>
+              <h3 className="text-xs font-bold tracking-wider uppercase text-indigo-400">Now Serving</h3>
+              <p className="text-6xl font-black text-white my-2">#{queueState.currentToken}</p>
+              <button onClick={handleCallNext} disabled={queueState.waitingList.length === 0} className="mt-5 w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 text-white font-semibold py-3 px-4 rounded-xl transition-all duration-200"><Zap className="w-5 h-5" /> Call Next Patient</button>
+            </div>
+            {/* Reset Live Queue Button Trigger Panel */}
+            <div className="mt-6 pt-4 border-t border-slate-700/40">
+              <button onClick={handleResetQueue} className="w-full flex items-center justify-center gap-2 border border-rose-500/30 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white font-medium py-2 px-4 rounded-xl transition duration-200 text-xs">
+                <Trash2 className="w-4 h-4" /> Reset Live Queue
+              </button>
+            </div>
           </div>
 
           <div className="bg-slate-800/40 border border-slate-700/50 p-6 rounded-2xl">

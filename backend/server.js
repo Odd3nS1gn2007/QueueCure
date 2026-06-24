@@ -21,7 +21,6 @@ const io = new Server(httpServer, {
   cors: { origin: "http://localhost:5173", methods: ["GET", "POST"] }
 });
 
-// Helper function to seed an empty department queue document if missing
 async function getOrCreateQueue(department) {
   let queue = await Queue.findOne({ department });
   if (!queue) {
@@ -42,7 +41,7 @@ io.on('connection', (socket) => {
   });
 });
 
-// 1. Add Patient / Generate Token (Atomic MongoDB Updates)
+// 1. Add Patient / Generate Token
 app.post('/api/queue/add', async (req, res) => {
   const { name, department, phone, duration } = req.body;
   try {
@@ -66,7 +65,7 @@ app.post('/api/queue/add', async (req, res) => {
   }
 });
 
-// 2. Move to Next (Bypass Logic / Late Pre-booking)
+// 2. Move to Next (Bypass Logic)
 app.post('/api/queue/move-next', async (req, res) => {
   const { department, patientId } = req.body;
   try {
@@ -106,6 +105,23 @@ app.post('/api/queue/next', async (req, res) => {
     io.to(department).emit('call_patient', { patientName: currentPatient.name, tokenNumber: currentPatient.tokenNumber });
 
     res.json({ success: true, queue });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. NEW: Reset Department Queue Collection Entry Completely
+app.post('/api/queue/reset', async (req, res) => {
+  const { department } = req.body;
+  try {
+    const resetQueue = await Queue.findOneAndUpdate(
+      { department },
+      { $set: { currentToken: 0, lastGeneratedToken: 0, waitingList: [], history: [] } },
+      { new: true, upsert: true }
+    );
+    
+    io.to(department).emit('queue_updated', resetQueue);
+    res.json({ success: true, queue: resetQueue });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
