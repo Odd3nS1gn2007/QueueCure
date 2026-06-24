@@ -5,54 +5,111 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import connectDB from './config/db.js';
+import Queue from './models/Queue.js';
 
 dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
 
-// Enable CORS so our frontend can talk to the backend safely
-app.use(cors({
-  origin: "http://localhost:5173", // Vite's default port
-  methods: ["GET", "POST", "PUT", "DELETE"]
-}));
+app.use(cors({ origin: "http://localhost:5173", methods: ["GET", "POST", "PUT", "DELETE"] }));
 app.use(express.json());
 
-// Initialize MongoDB Connection
 connectDB();
 
-// Live Socket.io Setup
 const io = new Server(httpServer, {
-  cors: {
-    origin: "http://localhost:5173",
-    methods: ["GET", "POST"]
+  cors: { origin: "http://localhost:5173", methods: ["GET", "POST"] }
+});
+
+// Helper function to seed an empty department queue document if missing
+async function getOrCreateQueue(department) {
+  let queue = await Queue.findOne({ department });
+  if (!queue) {
+    queue = await Queue.create({ department, currentToken: 0, lastGeneratedToken: 0, waitingList: [], history: [] });
+  }
+  return queue;
+}
+
+io.on('connection', (socket) => {
+  socket.on('join_room', async (room) => {
+    socket.join(room);
+    try {
+      const queue = await getOrCreateQueue(room);
+      socket.emit('queue_updated', queue);
+    } catch (err) {
+      console.error(err);
+    }
+  });
+});
+
+// 1. Add Patient / Generate Token (Atomic MongoDB Updates)
+app.post('/api/queue/add', async (req, res) => {
+  const { name, department, phone, duration } = req.body;
+  try {
+    const queue = await getOrCreateQueue(department);
+    queue.lastGeneratedToken += 1;
+
+    const newPatient = {
+      name,
+      phone,
+      duration: Number(duration) || 15,
+      tokenNumber: queue.lastGeneratedToken
+    };
+
+    queue.waitingList.push(newPatient);
+    await queue.save();
+
+    io.to(department).emit('queue_updated', queue);
+    res.status(201).json({ success: true, queue });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Socket.io Connection Router
-io.on('connection', (socket) => {
-  console.log(`🔌 Client connected: ${socket.id}`);
+// 2. Move to Next (Bypass Logic / Late Pre-booking)
+app.post('/api/queue/move-next', async (req, res) => {
+  const { department, patientId } = req.body;
+  try {
+    const queue = await Queue.findOne({ department });
+    if (!queue) return res.status(404).json({ error: "Queue not found" });
 
-  // Join department room (e.g., 'pediatrics', 'cardiology')
-  socket.on('join_room', (room) => {
-    socket.join(room);
-    console.log(`👤 User joined room: ${room}`);
-  });
+    const index = queue.waitingList.findIndex(p => p._id.toString() === patientId);
+    if (index > -1) {
+      const [patient] = queue.waitingList.splice(index, 1);
+      queue.waitingList.unshift(patient);
+      await queue.save();
 
-  socket.on('disconnect', () => {
-    console.log(`❌ Client disconnected: ${socket.id}`);
-  });
+      io.to(department).emit('queue_updated', queue);
+      return res.json({ success: true, queue });
+    }
+    res.status(404).json({ error: "Patient not found" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Make 'io' accessible to our API routes
-app.set('io', io);
+// 3. Call Next Patient
+app.post('/api/queue/next', async (req, res) => {
+  const { department } = req.body;
+  try {
+    const queue = await Queue.findOne({ department });
+    if (!queue || queue.waitingList.length === 0) {
+      return res.status(400).json({ error: "No patients waiting" });
+    }
 
-// Basic Health Check Route
-app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: "healthy", service: "clinic-queue-backend" });
+    const currentPatient = queue.waitingList.shift();
+    queue.currentToken = currentPatient.tokenNumber;
+    queue.history.push(currentPatient);
+    await queue.save();
+
+    io.to(department).emit('queue_updated', queue);
+    io.to(department).emit('call_patient', { patientName: currentPatient.name, tokenNumber: currentPatient.tokenNumber });
+
+    res.json({ success: true, queue });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 const PORT = process.env.PORT || 5000;
-httpServer.listen(PORT, () => {
-  console.log(`🚀 Queue Server running on http://localhost:${PORT}`);
-});
+httpServer.listen(PORT, () => console.log(`🚀 Real MongoDB Engine on http://localhost:${PORT}`));
